@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
-CORS(app)  
+CORS(app)
 
 # -------------------------------
 # 🔐 SECURITY CONFIGURATION
@@ -21,6 +21,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 
 def init_db():
+    """Initialize the database and ensure the required table exists."""
     try:
         os.makedirs(DB_PATH, exist_ok=True)  # Ensure the database directory exists
 
@@ -77,8 +78,7 @@ def store_sensor_data():
             for key, sensor_data in data_dict.items():
                 if "timestamp" in sensor_data:
                     utc_time = datetime.strptime(sensor_data["timestamp"], "%Y-%m-%d %H:%M:%S")
-                    utc_plus8 = utc_time  # Remove +8 hours here (to prevent double adjustment)
-                    sensor_data["timestamp"] = utc_plus8.strftime("%Y-%m-%d %H:%M:%S")
+                    sensor_data["timestamp"] = utc_time.strftime("%Y-%m-%d %H:%M:%S")
             data = json.dumps(data_dict)  # Convert back to JSON string
         except Exception as e:
             logging.warning(f"⚠️ Could not convert timestamp: {e}")
@@ -87,9 +87,21 @@ def store_sensor_data():
             cursor = conn.cursor()
             cursor.execute("INSERT INTO azp (project, data) VALUES (?, ?)", (project, data))
             conn.commit()
+            last_id = cursor.lastrowid  # Get last inserted ID
 
-        logging.info(f"✅ Data stored (UTC-8): Project={project}, Data={data}")
-        return jsonify({"message": f"{project.capitalize()} data stored successfully"}), 201
+        logging.info(f"✅ Data stored (UTC-8): ID={last_id}, Project={project}, Data={data}")
+
+        # Verify if data is actually stored
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM azp WHERE id = ?", (last_id,))
+            inserted_data = cursor.fetchone()
+            if inserted_data:
+                logging.info(f"✅ Verified Inserted Data: {inserted_data}")
+            else:
+                logging.error("❌ Data insertion verification failed!")
+
+        return jsonify({"message": f"{project.capitalize()} data stored successfully", "id": last_id}), 201
     except Exception as e:
         logging.error(f"❌ Error storing data: {e}")
         return jsonify({"error": str(e)}), 500
@@ -125,8 +137,7 @@ def get_sensor_data():
         data_fixed = []
         for row in data:
             utc_time = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
-            utc_plus8 = utc_time  # Remove +8 hours here as well
-            new_timestamp = utc_plus8.strftime("%Y-%m-%d %H:%M:%S")
+            new_timestamp = utc_time.strftime("%Y-%m-%d %H:%M:%S")
 
             data_fixed.append({
                 "id": row[0],
